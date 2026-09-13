@@ -1,4 +1,4 @@
-https://github.com/USUARIO-PENDIENTE/st-2026-2-tarea1-herramientas-garro-juan-david
+https://github.com/jgarro123/st-2026-2-tarea1-herramientas-garro-juan-david
 
 # Qué contiene el repositorio
 
@@ -31,7 +31,7 @@ Rscript ejemplos/ejemplos.R
 Rscript tests/pruebas.R
 ```
 
-Ejecución observada en Windows con R 4.4.2: aproximadamente 13 segundos para los ocho ejemplos, 28 figuras, resultados e informe HTML. No se necesita Quarto para reproducir el HTML entregado. Antes de publicar, reemplace `USUARIO-PENDIENTE` en la primera línea por el usuario real de GitHub.
+Ejecución observada en Windows con R 4.4.2: aproximadamente 13 segundos para los ocho ejemplos, 36 figuras, resultados e informe HTML. No se necesita Quarto para reproducir el HTML entregado.
 
 # Cómo se usan las funciones
 
