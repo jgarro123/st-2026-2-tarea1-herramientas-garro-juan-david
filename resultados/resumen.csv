@@ -1,0 +1,9 @@
+"metodo","serie","parametros","h","referente","MASE_metodo","MASE_referencia","p_LB_errores"
+"Media recursiva","discoveries","media=3.31",12,"Ingenuo",0.919164619164619,1.13648648648649,0.118135004724839
+"Media móvil","Nile","k=9",12,"Ingenuo",0.825138660591554,0.835452893848949,0.00357278434599353
+"SES","LakeHuron","alpha=0.98",12,"Ingenuo",2.14133803088227,2.16419057377053,0.118791663292817
+"Doble media móvil","WWWusage","k=2",12,"Ingenuo",1.36757105943152,7.62467700258398,1.16698841649004e-06
+"Tendencia lineal","airmiles","lineal; R2=0.881",4,"Ingenuo",6.38518289780111,4.49587949202918,4.14572210733443e-05
+"Tendencia cuadrática","airmiles","cuadratica; R2=0.989",4,"Ingenuo",1.20547830760609,4.49587949202918,0.000300676577514553
+"Tendencia exponencial","JohnsonJohnson","exponencial; R2=0.973",12,"Ingenuo estacional",3.58597846692184,6.52857142857143,5.12471583936512e-15
+"Holt","LakeHuron","alpha=0.95; beta=0.05",12,"Ingenuo",2.0901719274592,2.16419057377053,0.0636138301430347

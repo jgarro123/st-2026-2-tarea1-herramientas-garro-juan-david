@@ -1,0 +1,32 @@
+---
+title: "Tarea 1: herramientas de pronóstico"
+author: "Juan David Garro"
+format: html
+lang: es
+execute:
+  echo: true
+  warning: false
+---
+
+## Propósito y reproducibilidad
+
+Este informe documenta ocho implementaciones manuales de herramientas de pronóstico y un contraejemplo. La ejecución oficial se realiza desde la raíz del repositorio con:
+
+```{r}
+#| eval: false
+source("ejemplos/ejemplos.R")
+```
+
+El guion genera `informe/informe.html`, las figuras, la tabla resumen y la información de sesión. Se separa el último horizonte de cada serie antes de elegir parámetros, evitando que la validación participe en el ajuste.
+
+## Convenciones estadísticas
+
+La ACF muestral usa divisor $T$. Las bandas individuales se fijan en $\pm q_{0.975}/\sqrt{n}$. Ljung–Box se compara con $\chi^2_{m-p}$ y todas las pruebas usan $\alpha=0.05$. MASE usa como escala el error absoluto medio del referente ingenuo sobre el entrenamiento y todas las comparaciones comparten origen y horizonte.
+
+## Resultados
+
+Los resultados completos —metadatos, ACF/PACF, selección de parámetros, métricas dentro y fuera de muestra, seis elementos de cada contraste, gráficos y conclusión numérica— se escriben en `informe.html` al ejecutar el proyecto.
+
+## Declaración de uso de IA
+
+Se usó asistencia de IA para estructurar funciones, proponer comprobaciones y redactar una primera versión del informe. Se le pidió transformar las especificaciones de la tarea y las notas de clase en una implementación reproducible. Se recibió código inicial, organización del análisis y propuestas de validación. Las fórmulas de clase se contrastaron de manera independiente; la ACF manual y Ljung–Box se verificaron numéricamente frente a funciones base permitidas. El autor debe revisar la ejecución y ser capaz de explicar cada decisión y cada línea antes de entregar.
