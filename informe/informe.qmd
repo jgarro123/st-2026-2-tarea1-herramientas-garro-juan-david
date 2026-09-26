@@ -468,16 +468,6 @@ $$
 
 y se compara con $\chi^2_{m-p}$ en los errores. La partición reserva las últimas $h=\min\{12,\lfloor0.2T\rfloor\}$ observaciones y, en una serie estacional, por lo menos un ciclo completo. MASE utiliza como escala el error absoluto medio del ingenuo correspondiente dentro del tramo de estimación.
 
-::: {.callout-note}
-## Decisiones documentadas durante la elaboración
-
-Este QMD deja registro de dos decisiones que en versiones anteriores estaban abiertas:
-
-Durbin–Watson sobre los errores de los tres ejemplos de tendencia se resuelve con el valor p exacto por el método de Imhof (1961), en vez de transcribir las cotas $d_L$/$d_U$ de una tabla: se construye la matriz de diseño de cada modelo, se obtienen los autovalores de la forma cuadrática que define el estadístico $d$ bajo $H_0$, y se integra numéricamente la fórmula de Imhof (función `dw_pvalor_exacto()`, solo con R base). Se verificó por separado, en 15 escenarios simulados con y sin autocorrelación, que coincide a 6 decimales con `lmtest::dwtest()`. Para los cinco métodos de nivel (que no tienen una matriz de diseño fija) el estadístico se sigue reportando de forma descriptiva, sin decisión formal, porque la rúbrica exige las cotas únicamente para los ejemplos de tendencia.
-
-La elección de serie para la tendencia exponencial se resolvió comparando cuantitativamente tres alternativas con el mismo protocolo: `JohnsonJohnson`, `airmiles` y `UKgas`. Las dos últimas tienen un R² en muestra similar o incluso más bajo, pero extrapolan mal: `airmiles` da MASE = 20.807 y `UKgas` da MASE = 10.234 en validación, ambos muy por encima de su referente ingenuo. `JohnsonJohnson` es la única que sí supera al referente en validación (MASE = 3.586 frente a 6.529) y con el menor MAPE (16.9 %), así que se mantiene como el ejemplo de tendencia exponencial. Su límite reconocido es la oscilación trimestral que el modelo no captura, visible en el Ljung–Box y el Jarque–Bera de los errores; `austres` sí tomó el lugar de `airmiles` en la tendencia lineal, donde ajusta mejor.
-:::
-
 # Resumen de los ocho ejemplos
 
 ```{r}

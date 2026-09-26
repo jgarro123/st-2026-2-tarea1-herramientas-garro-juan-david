@@ -3355,21 +3355,6 @@ window.Quarto = {
 Q_m=T(T+2)\sum_{h=1}^{m}\frac{r_h^2}{T-h}
 \]</span></p>
 <p>y se compara con <span class="math inline">\(\chi^2_{m-p}\)</span> en los errores. La partición reserva las últimas <span class="math inline">\(h=\min\{12,\lfloor0.2T\rfloor\}\)</span> observaciones y, en una serie estacional, por lo menos un ciclo completo. MASE utiliza como escala el error absoluto medio del ingenuo correspondiente dentro del tramo de estimación.</p>
-<div class="callout callout-style-default callout-note callout-titled">
-<div class="callout-header d-flex align-content-center">
-<div class="callout-icon-container">
-<i class="callout-icon"></i>
-</div>
-<div class="callout-title-container flex-fill">
-Decisiones documentadas durante la elaboración
-</div>
-</div>
-<div class="callout-body-container callout-body">
-<p>Este QMD deja registro de dos decisiones que en versiones anteriores estaban abiertas:</p>
-<p>Durbin–Watson sobre los errores de los tres ejemplos de tendencia se resuelve con el valor p exacto por el método de Imhof (1961), en vez de transcribir las cotas <span class="math inline">\(d_L\)</span>/<span class="math inline">\(d_U\)</span> de una tabla: se construye la matriz de diseño de cada modelo, se obtienen los autovalores de la forma cuadrática que define el estadístico <span class="math inline">\(d\)</span> bajo <span class="math inline">\(H_0\)</span>, y se integra numéricamente la fórmula de Imhof (función <code>dw_pvalor_exacto()</code>, solo con R base). Se verificó por separado, en 15 escenarios simulados con y sin autocorrelación, que coincide a 6 decimales con <code>lmtest::dwtest()</code>. Para los cinco métodos de nivel (que no tienen una matriz de diseño fija) el estadístico se sigue reportando de forma descriptiva, sin decisión formal, porque la rúbrica exige las cotas únicamente para los ejemplos de tendencia.</p>
-<p>La elección de serie para la tendencia exponencial se resolvió comparando cuantitativamente tres alternativas con el mismo protocolo: <code>JohnsonJohnson</code>, <code>airmiles</code> y <code>UKgas</code>. Las dos últimas tienen un R² en muestra similar o incluso más bajo, pero extrapolan mal: <code>airmiles</code> da MASE = 20.807 y <code>UKgas</code> da MASE = 10.234 en validación, ambos muy por encima de su referente ingenuo. <code>JohnsonJohnson</code> es la única que sí supera al referente en validación (MASE = 3.586 frente a 6.529) y con el menor MAPE (16.9 %), así que se mantiene como el ejemplo de tendencia exponencial. Su límite reconocido es la oscilación trimestral que el modelo no captura, visible en el Ljung–Box y el Jarque–Bera de los errores; <code>austres</code> sí tomó el lugar de <code>airmiles</code> en la tendencia lineal, donde ajusta mejor.</p>
-</div>
-</div>
 </section>
 <section id="resumen-de-los-ocho-ejemplos" class="level1" data-number="3">
 <h1 data-number="3"><span class="header-section-number">3</span> Resumen de los ocho ejemplos</h1>
