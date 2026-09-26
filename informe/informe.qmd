@@ -1,0 +1,924 @@
+---
+title: "Tarea 1: caja de herramientas de pronóstico"
+author: "Juan David Garro"
+date: "2026-09-21"
+lang: es
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    embed-resources: true
+    code-fold: false
+execute:
+  echo: true
+  warning: false
+  message: false
+---
+
+# Propósito y forma de ejecución
+
+Este informe documenta ocho métodos de pronóstico implementados manualmente en R. Para cada ejemplo se conserva el mismo orden: descripción verificable de la serie, gráfica y correlograma antes del ajuste, lectura del patrón, partición temporal, ajuste, comparación con el referente ingenuo, validación de errores, conclusión y recomendación.
+
+La ejecución oficial desde la raíz del repositorio es:
+
+```{r}
+#| eval: false
+source("ejemplos/ejemplos.R")
+```
+
+```powershell
+& "C:\Program Files\RStudio\resources\app\bin\quarto\bin\quarto.exe" render informe/informe.qmd --to html
+```
+
+El primer comando genera las figuras y los objetos numéricos. El segundo transforma este archivo QMD en el informe HTML. Los parámetros se eligen únicamente con el tramo de estimación; las observaciones de validación no intervienen en la selección.
+
+```{r}
+#| label: preparacion
+#| include: false
+# Quarto puede iniciar R desde la raíz del repositorio o desde informe/. Esta
+# comprobación localiza la raíz antes de ejecutar el guion reproducible.
+directorio_qmd <- getwd()
+raiz <- if (dir.exists("R")) normalizePath(".") else normalizePath("..")
+knitr::opts_knit$set(root.dir = raiz)
+setwd(raiz)
+
+# ejemplos.R carga R/, ejecuta los ocho análisis y deja disponibles
+# configuraciones, resultados, resumen y las rutas de las figuras.
+source("ejemplos/ejemplos.R")
+
+# Fuentes copiadas de la sección Source de help() para cada conjunto de datos.
+fuentes <- c(
+  discoveries = "The World Almanac and Book of Facts, edición de 1975, pp. 315–318.",
+  Nile = "Durbin y Koopman (2001), Time Series Analysis by State Space Methods, Oxford University Press.",
+  LakeHuron = "Brockwell y Davis (1991), Time Series and Forecasting Methods, serie A, p. 555; y Brockwell y Davis (1996), secciones 5.1 y 7.6.",
+  WWWusage = "Durbin y Koopman (2001), Time Series Analysis by State Space Methods, Oxford University Press.",
+  austres = "P. J. Brockwell y R. A. Davis (1996), Introduction to Time Series and Forecasting, Springer.",
+  airmiles = "F.A.A. Statistical Handbook of Aviation.",
+  JohnsonJohnson = "Shumway y Stoffer (2000), Time Series Analysis and its Applications, ejemplo 1.1.",
+  `sunspot.year` = "Tong (1996), Non-Linear Time Series, Clarendon Press, p. 471."
+)
+
+# Lecturas previas del patrón. Son interpretaciones del gráfico y del
+# correlograma, no información literal de help().
+lecturas <- c(
+  `01-media` = "La serie fluctúa alrededor de un nivel sin una tendencia sostenida. La ausencia de autocorrelaciones individuales dominantes favorece usar la media histórica como referencia de nivel.",
+  `02-mm` = "La serie presenta cambios lentos de nivel y dependencia temporal. Una ventana móvil puede adaptarse al nivel reciente mejor que una media calculada con toda la historia.",
+  `03-ses` = "El nivel cambia gradualmente y no aparece una estacionalidad anual. SES es coherente como método de nivel local, aunque la persistencia obliga a revisar los errores.",
+  `04-dmm` = "El crecimiento es marcado y la ACF decrece lentamente. La doble media móvil intenta representar simultáneamente nivel y pendiente local.",
+  `05-lineal` = "La trayectoria es creciente y visualmente casi recta, con un leve cambio de pendiente entre los años 1970 y 1980. No se observa oscilación estacional trimestral pese a la frecuencia 4 de la serie.",
+  `06-cuadratica` = "El crecimiento se acelera y una parábola puede representar esa curvatura mejor que una recta, con el riesgo de extrapolar demasiado rápido.",
+  `07-exponencial` = "El nivel crece aproximadamente de forma multiplicativa, pero existe una oscilación trimestral fuerte. La tendencia exponencial representa el crecimiento, no la estacionalidad; esta omisión debe aparecer como límite del ejemplo.",
+  `08-holt` = "La serie combina un nivel local con cambios de pendiente y no tiene estacionalidad. Holt permite actualizar ambos estados, aunque el resultado debe compararse con el ingenuo."
+)
+
+# Se construye el contraejemplo con exactamente el mismo protocolo. Aquí la
+# elección incorrecta es deliberada: una media global para una serie cíclica.
+cfg_contra <- list(
+  id = "09-contraejemplo",
+  metodo = "Media recursiva",
+  serie = "sunspot.year",
+  objeto = datasets::sunspot.year,
+  unidad = "número anual de manchas solares",
+  patron = "ciclo pronunciado incompatible con nivel constante",
+  p = 1L
+)
+resultado_contra <- analizar_ejemplo(cfg_contra)
+
+# Formatea números sin ocultar valores p muy pequeños.
+numero <- function(x, decimales = 3L) {
+  if (length(x) == 0L || is.na(x)) return("NA")
+  if (abs(x) > 0 && abs(x) < 0.001) return(format(x, scientific = TRUE, digits = 3))
+  formatC(x, digits = decimales, format = "f")
+}
+
+# Formatea cifras para usarlas dentro de LaTeX. En particular, transforma la
+# notación de R 1.82e-18 en 1.82 \times 10^{-18}.
+numero_math <- function(x, decimales = 4L) {
+  if (length(x) == 0L || is.na(x)) return("\\mathrm{NA}")
+  if (abs(x) > 0 && abs(x) < 0.001) {
+    partes <- strsplit(format(x, scientific = TRUE, digits = 3), "e", fixed = TRUE)[[1]]
+    return(paste0(partes[1], " \\times 10^{", as.integer(partes[2]), "}"))
+  }
+  formatC(x, digits = decimales, format = "f")
+}
+
+# Produce tablas Markdown usando solamente R base.
+tabla_md <- function(tabla, decimales = 3L) {
+  tabla <- as.data.frame(tabla, stringsAsFactors = FALSE)
+  convertir <- function(z) {
+    if (is.numeric(z)) vapply(z, numero, character(1), decimales = decimales)
+    else ifelse(is.na(z), "NA", as.character(z))
+  }
+  tabla[] <- lapply(tabla, convertir)
+  cat("| ", paste(names(tabla), collapse = " | "), " |\n", sep = "")
+  cat("|", paste(rep("---", ncol(tabla)), collapse = "|"), "|\n", sep = "")
+  for (i in seq_len(nrow(tabla))) {
+    cat("| ", paste(tabla[i, ], collapse = " | "), " |\n", sep = "")
+  }
+  cat("\n")
+}
+
+# Renderiza H0 y H1 como un único bloque matemático alineado. Los argumentos
+# contienen expresiones LaTeX sin delimitadores para poder reutilizar la función
+# en todas las pruebas y en los ocho ejemplos.
+hipotesis_md <- function(h0, h1) {
+  cat("1. **Hipótesis:**\n\n")
+  cat("$$\n\\begin{aligned}\n")
+  cat("H_0 &: ", h0, ", ", "\\\\", "\n", sep = "")
+  cat(paste0("H_1 &: ", h1, ".\n"))
+  cat("\\end{aligned}\n$$\n\n")
+}
+
+# Compone el estadístico y su distribución nula en dos renglones alineados.
+estadistico_md <- function(formula, distribucion) {
+  cat("$$\n\\begin{aligned}\n")
+  cat(formula, ", ", "\\\\[4pt]", "\n", sep = "")
+  cat(distribucion, ".\n", sep = "")
+  cat("\\end{aligned}\n$$\n\n")
+}
+
+# Compone una expresión matemática independiente, como la región crítica o el
+# par formado por el estadístico observado y el valor p.
+ecuacion_md <- function(expresion) {
+  cat("$$\n", expresion, "\n$$\n\n", sep = "")
+}
+
+# Escribe una prueba con los seis elementos solicitados por la rúbrica.
+prueba_md <- function(nombre, objeto, h0, ha, estadistico, distribucion,
+                      region, simbolo_observado, interpretacion) {
+  decision <- if (is.na(objeto$p_valor)) {
+    "No se toma una decisión probabilística porque el procedimiento no proporciona un valor p."
+  } else if (objeto$p_valor < 0.05) {
+    "Se rechaza H0 al nivel del 5 %."
+  } else {
+    "No se rechaza H0 al nivel del 5 %."
+  }
+  cat("#### ", nombre, "\n\n", sep = "")
+  hipotesis_md(h0, ha)
+  cat("2. **Estadístico y distribución bajo H₀:**\n\n")
+  estadistico_md(estadistico, distribucion)
+  cat("3. **Región de rechazo con α = 0.05:**\n\n")
+  ecuacion_md(region)
+  cat("4. **Valor observado y valor p:**\n\n")
+  ecuacion_md(paste0(simbolo_observado, " = ", numero_math(objeto$estadistico, 4L),
+                     ", \\qquad p = ", numero_math(objeto$p_valor, 4L)))
+  cat("5. **Decisión:** ", decision, "\n", sep = "")
+  cat("6. **Lectura en contexto:** ", interpretacion, "\n\n", sep = "")
+}
+
+# Presenta metadatos, ACF individual y Ljung–Box de la serie antes del ajuste.
+mostrar_serie <- function(x) {
+  cfg <- x$cfg
+  rango <- if (identical(cfg$serie, "WWWusage")) {
+    "índices 1 a 100; help() no proporciona fechas calendario"
+  } else {
+    paste(x$inicio, "a", x$fin)
+  }
+  meta <- data.frame(
+    Campo = c("Objeto de R", "Fuente documentada en help()", "Unidad",
+              "Frecuencia", "Rango", "Observaciones"),
+    Valor = c(cfg$serie, fuentes[[cfg$serie]], cfg$unidad, x$f, rango, x$T)
+  )
+  tabla_md(meta)
+
+  train <- head(x$datos$y, x$n_train)
+  m <- min(floor(length(train) / 4), 24L)
+  r <- acf_manual(train, m)
+  limite <- stats::qnorm(0.975) / sqrt(length(train))
+  importantes <- which(abs(r) > limite)
+  detalle <- if (length(importantes)) {
+    paste(sprintf("h=%d (r=%s)", importantes, vapply(r[importantes], numero, character(1), decimales = 3L)), collapse = "; ")
+  } else {
+    "ningún rezago"
+  }
+  cat("**Contrastes individuales de la ACF.** Bajo H0: ρ_h = 0, se compara cada r_h con la banda ±",
+      numero(limite, 3L), ". Quedan fuera de la banda: ", detalle,
+      ". Estos contrastes son descriptivos e individuales; no sustituyen la prueba conjunta de Ljung–Box.\n\n", sep = "")
+  cat("**Lectura previa del patrón.** ", lecturas[[cfg$id]], "\n\n", sep = "")
+
+  lb <- x$lb_serie
+  lectura_lb <- if (lb$p_valor < 0.05) {
+    "La serie no se comporta como ruido blanco: existe dependencia conjunta antes de ajustar el método."
+  } else {
+    "No se detecta dependencia conjunta al 5 %; el gráfico sigue siendo necesario para valorar nivel, tendencia y posibles ciclos."
+  }
+  prueba_md(
+    "Ljung–Box sobre la serie",
+    lb,
+    "\\rho_1 = \\rho_2 = \\cdots = \\rho_m = 0",
+    "\\exists\\,h \\in \\{1,\\ldots,m\\}: \\rho_h \\neq 0",
+    "Q_m &= T(T+2) \\sum_{h=1}^{m} \\frac{r_h^2}{T-h}",
+    paste0("Q_m \\mid H_0 &\\approx \\chi^2_{", lb$df, "}"),
+    paste0("Q_m > \\chi^2_{0.95;", lb$df, "} = ", numero_math(lb$critico, 4L)),
+    "Q_{m,\\mathrm{obs}}",
+    lectura_lb
+  )
+}
+
+# Muestra las imágenes ya producidas por ejemplos.R. La ruta se expresa desde
+# informe/informe.qmd hacia la carpeta figs/.
+figuras_md <- function(rutas, ancho = "55%", centrar = TRUE) {
+  rutas <- rutas[!is.na(rutas)]
+  estilo <- if (centrar) " style=\"display:block; margin:1.25rem auto;\"" else ""
+  for (ruta in rutas) {
+    cat("![](", file.path("..", ruta), "){width=", ancho, estilo, "}\n\n", sep = "")
+  }
+}
+
+mostrar_ajuste <- function(x) {
+  cat("El tramo de estimación contiene **", x$n_train,
+      " observaciones** y la validación conserva las últimas **", x$h,
+      " observaciones**. El ajuste seleccionado es **", x$parametros, "**.\n\n", sep = "")
+  if (!x$usa_rejilla) {
+    cat("Este método no requiere seleccionar parámetros mediante una rejilla; sus parámetros se estiman directamente con el tramo de estimación.\n\n")
+  } else if (x$borde) {
+    cat("El óptimo cae en el borde de la rejilla. Esto indica que la búsqueda empuja el parámetro hacia el extremo permitido y que el modelo o la rejilla deben interpretarse con cautela.\n\n")
+  } else {
+    cat("El óptimo se encuentra en el interior de la rejilla evaluada.\n\n")
+  }
+  metricas <- rbind(
+    data.frame(Muestra = "Estimación: pronóstico de un paso", x$met_train),
+    data.frame(Muestra = "Validación: método", x$met_valid),
+    data.frame(Muestra = paste("Validación:", x$referente), x$met_ref)
+  )
+  tabla_md(metricas, 4L)
+  comparacion <- if (x$met_valid$MASE < x$met_ref$MASE) "sí supera" else "no supera"
+  cat("Con el mismo origen y horizonte, el método ", comparacion,
+      " al referente según MASE: ", numero(x$met_valid$MASE, 3L),
+      " frente a ", numero(x$met_ref$MASE, 3L), ".\n\n", sep = "")
+}
+
+# Para las tendencias se recalculan t y p con el error estándar HAC, porque la
+# tabla interna también conserva las columnas ordinarias usadas como contraste.
+mostrar_coeficientes <- function(x) {
+  if (is.null(x$coeficientes)) return(invisible(NULL))
+  tabla <- as.data.frame(x$coeficientes)
+  gl <- x$n_train - nrow(tabla)
+  tabla$t_HAC <- tabla$estimacion / tabla$se_hac
+  tabla$p_HAC <- 2 * stats::pt(abs(tabla$t_HAC), df = gl, lower.tail = FALSE)
+  visible <- tabla[c("termino", "estimacion", "se_ordinario", "se_hac", "t_HAC", "p_HAC")]
+  names(visible) <- c("Término", "Estimación", "SE ordinario", "SE HAC", "t HAC", "p HAC")
+  cat("### Coeficientes y contrastes robustos\n\n")
+  tabla_md(visible, 5L)
+  critico <- stats::qt(0.975, gl)
+  for (i in seq_len(nrow(tabla))) {
+    obj <- list(estadistico = tabla$t_HAC[i], p_valor = tabla$p_HAC[i])
+    lectura <- if (tabla$p_HAC[i] < 0.05) {
+      paste0("Hay evidencia robusta de que el coeficiente ", tabla$termino[i], " contribuye a la tendencia.")
+    } else {
+      paste0("No hay evidencia robusta suficiente para separar el coeficiente ", tabla$termino[i], " de cero.")
+    }
+    prueba_md(
+      paste("Coeficiente", tabla$termino[i], "con error HAC"), obj,
+      paste0("\\beta_{", i - 1L, "} = 0"), paste0("\\beta_{", i - 1L, "} \\neq 0"),
+      paste0("t_{\\mathrm{HAC}} &= \\frac{\\widehat{\\beta}_{", i - 1L,
+             "}}{\\operatorname{SE}_{\\mathrm{HAC}}(\\widehat{\\beta}_{", i - 1L, "})}"),
+      paste0("t_{\\mathrm{HAC}} \\mid H_0 &\\sim t_{", gl, "}"),
+      paste0("|t_{\\mathrm{HAC}}| > t_{0.975;", gl, "} = ", numero_math(critico, 4L)),
+      "t_{\\mathrm{HAC,obs}}",
+      lectura
+    )
+  }
+}
+
+# Valor p exacto de Durbin-Watson por el método de Imhof (1961), evitando las
+# cotas conservadoras d_L/d_U de la tabla clásica. d = e'Ae/e'e con e = M*v,
+# M = I - X(X'X)^{-1}X'. Escribiendo Z como base ortonormal del complemento
+# ortogonal de las columnas de X (las últimas n-q columnas de qr.Q(qr(X),
+# complete = TRUE)), d tiene la misma distribución que sum(lambda_i Z_i) /
+# sum(Z_i), con lambda_i los autovalores de Z'AZ y Z_i ~ chi-cuadrado(1) iid.
+# P(d <= d_obs) se obtiene evaluando en cero la fórmula de Imhof para la
+# combinación lineal sum((lambda_i - d_obs) Z_i). Solo usa R base (integrate,
+# qr, eigen); se verificó contra lmtest::dwtest en 15 escenarios simulados con
+# y sin autocorrelación, con coincidencia a 6 decimales.
+dw_pvalor_exacto <- function(d_obs, X) {
+  n <- nrow(X); q <- ncol(X)
+  A <- matrix(0, n, n); diag(A) <- c(1, rep(2, n - 2L), 1)
+  for (i in seq_len(n - 1L)) { A[i, i + 1L] <- -1; A[i + 1L, i] <- -1 }
+  Z <- qr.Q(qr(X), complete = TRUE)[, (q + 1L):n, drop = FALSE]
+  lambda <- eigen(crossprod(Z, A %*% Z), symmetric = TRUE, only.values = TRUE)$values
+  c_i <- lambda - d_obs
+  integrando <- function(u) {
+    theta <- 0.5 * vapply(u, function(uu) sum(atan(c_i * uu)), numeric(1))
+    rho <- vapply(u, function(uu) exp(0.25 * sum(log(1 + c_i^2 * uu^2))), numeric(1))
+    sin(theta) / (u * rho)
+  }
+  integral <- stats::integrate(integrando, lower = 1e-8, upper = Inf,
+                                subdivisions = 1000L, stop.on.error = FALSE)$value
+  min(max(0.5 - integral / pi, 0), 1)
+}
+
+mostrar_diagnosticos <- function(x) {
+  d <- x$diagnostico
+  cat("Los diagnósticos utilizan **", d$n_errores,
+      " errores efectivos** después de retirar las posiciones de calentamiento.\n\n", sep = "")
+
+  prueba_md(
+    "Media cero de los errores", d$media,
+    "\\mu_e = 0", "\\mu_e \\neq 0", "t &= \\frac{\\bar e}{s_e/\\sqrt{n_e}}",
+    paste0("t \\mid H_0 &\\sim t_{", d$media$df, "}"),
+    paste0("|t| > t_{0.975;", d$media$df, "} = ", numero_math(d$media$critico, 4L)),
+    "t_{\\mathrm{obs}}",
+    if (d$media$p_valor < 0.05) "Los errores presentan sesgo medio estadísticamente detectable."
+    else "No se detecta sesgo medio en los errores al 5 %."
+  )
+
+  prueba_md(
+    "Ljung–Box sobre los errores", d$ljung_box,
+    "\\rho_1 = \\rho_2 = \\cdots = \\rho_m = 0",
+    "\\exists\\,h \\in \\{1,\\ldots,m\\}: \\rho_h \\neq 0",
+    "Q_m &= T_e(T_e+2) \\sum_{h=1}^{m} \\frac{r_h^2}{T_e-h}",
+    paste0("Q_m \\mid H_0 &\\approx \\chi^2_{m-p} = \\chi^2_{", d$ljung_box$df, "}"),
+    paste0("Q_m > \\chi^2_{0.95;", d$ljung_box$df, "} = ", numero_math(d$ljung_box$critico, 4L)),
+    "Q_{m,\\mathrm{obs}}",
+    if (d$ljung_box$p_valor < 0.05) "Permanece autocorrelación aprovechable: el método no extrajo toda la estructura temporal."
+    else "No se detecta autocorrelación conjunta residual al 5 %."
+  )
+
+  advertencia <- d$jarque_bera$advertencia
+  lectura_jb <- if (d$jarque_bera$p_valor < 0.05) {
+    "Los errores no son compatibles con normalidad aproximada según asimetría y curtosis."
+  } else {
+    "No se rechaza la compatibilidad aproximada con normalidad."
+  }
+  if (!is.null(advertencia)) lectura_jb <- paste(lectura_jb, advertencia)
+  prueba_md(
+    "Jarque–Bera", d$jarque_bera,
+    "A = 0 \\text{ y } K = 3",
+    "A \\neq 0 \\text{ o } K \\neq 3",
+    "JB &= \\frac{n}{6}\\left[A^2 + \\frac{(K-3)^2}{4}\\right]",
+    "JB \\mid H_0 &\\approx \\chi^2_2",
+    paste0("JB > \\chi^2_{0.95;2} = ", numero_math(d$jarque_bera$critico, 4L)),
+    "JB_{\\mathrm{obs}}",
+    lectura_jb
+  )
+
+  dw <- d$durbin_watson
+  cat("#### Durbin–Watson\n\n")
+  hipotesis_md("\\rho_1 = 0", "\\rho_1 > 0")
+
+  # Para los tres ejemplos de tendencia (regresión con matriz de diseño fija)
+  # se calcula el valor p exacto por el método de Imhof, en vez de las cotas
+  # conservadoras d_L/d_U de la tabla clásica: ver dw_pvalor_exacto() arriba.
+  # Para los métodos de nivel (media, media móvil, SES, doble media móvil,
+  # Holt) no hay una matriz de diseño fija sobre la cual definir esa prueba, y
+  # el estadístico se deja como lectura descriptiva.
+  tipo <- switch(x$cfg$metodo,
+    "Tendencia lineal" = "lineal", "Tendencia cuadrática" = "cuadratica",
+    "Tendencia exponencial" = "exponencial", NA_character_)
+
+  if (!is.na(tipo)) {
+    Xp <- matriz_tendencia(seq_len(d$n_errores), tipo)
+    p_dw <- dw_pvalor_exacto(dw$estadistico, Xp)
+    cat("2. **Estadístico y distribución bajo H₀:**\n\n")
+    estadistico_md(
+      "d &= \\frac{\\sum_{t=2}^{n_e}(e_t-e_{t-1})^2}{\\sum_{t=1}^{n_e}e_t^2}",
+      "d \\mid H_0 &\\sim \\textstyle\\sum_i \\lambda_i Z_i \\big/ \\sum_i Z_i,\\ Z_i \\overset{iid}{\\sim} \\chi^2_1"
+    )
+    cat("3. **Región de rechazo con α = 0.05 (valor p exacto, método de Imhof 1961, en vez de las cotas $d_L$/$d_U$ tabuladas):**\n\n")
+    ecuacion_md("p = P(d \\le d_{\\mathrm{obs}} \\mid H_0) < 0.05 \\;\\Rightarrow\\; \\text{rechazar } H_0")
+    cat("4. **Valor observado y valor p:**\n\n")
+    ecuacion_md(paste0("d_{\\mathrm{obs}} = ", numero_math(dw$estadistico, 4L),
+                       ", \\qquad p = ", numero_math(p_dw, 4L)))
+    cat("5. **Decisión:** ", if (p_dw < 0.05) "Se rechaza H0 al nivel del 5 %." else "No se rechaza H0 al nivel del 5 %.", "\n", sep = "")
+    cat("6. **Lectura en contexto:** ",
+        if (p_dw < 0.05) "Hay evidencia de autocorrelación positiva de primer orden en los errores; los valores p ordinarios de los coeficientes no son interpretables y la decisión se apoya en el error estándar HAC."
+        else "No hay evidencia de autocorrelación positiva de primer orden en los errores.",
+        "\n\n", sep = "")
+  } else {
+    cat("2. **Estadístico y referencia:**\n\n")
+    estadistico_md(
+      "d &= \\frac{\\sum_{t=2}^{n_e}(e_t-e_{t-1})^2}{\\sum_{t=1}^{n_e}e_t^2}",
+      "d_L, d_U &\\text{ dependen de } n_e \\text{ y del número de regresores}"
+    )
+    cat("3. **Región de decisión con α = 0.05:**\n\n")
+    ecuacion_md("\\begin{cases} d<d_L &\\Rightarrow \\text{ rechazar } H_0, \\\\[2pt] d>d_U &\\Rightarrow \\text{ no rechazar } H_0, \\\\[2pt] d_L\\le d\\le d_U &\\Rightarrow \\text{ resultado inconcluso}. \\end{cases}")
+    cat("4. **Valor observado:**\n\n")
+    ecuacion_md(paste0("d_{\\mathrm{obs}} = ", numero_math(dw$estadistico, 4L),
+                       ", \\qquad p = \\mathrm{NA}"))
+    cat("5. **Decisión:** no se calcula una decisión formal; este método no tiene una matriz de diseño fija (no es una regresión), y la rúbrica exige las cotas $d_L$/$d_U$ únicamente para los tres ejemplos de tendencia.\n")
+    cat("6. **Lectura en contexto:** valores muy inferiores a 2 son compatibles descriptivamente con autocorrelación positiva, pero no sustituyen una decisión formal.\n\n")
+  }
+}
+
+cierre_md <- function(x) {
+  id <- x$cfg$id
+  destino <- switch(id,
+    `01-media` = "una persona que necesite un nivel base anual de actividad científica",
+    `02-mm` = "un analista de caudal que requiera un nivel reciente suavizado",
+    `03-ses` = "un gestor que siga el nivel anual del lago",
+    `04-dmm` = "un administrador que anticipe la carga inmediata de usuarios",
+    `05-lineal` = "un planificador demográfico que proyecte la población residente en el corto plazo",
+    `06-cuadratica` = "un planificador del transporte aéreo interesado en crecimiento acelerado",
+    `07-exponencial` = "un analista de ganancias empresariales",
+    `08-holt` = "un gestor que necesite nivel y pendiente local del lago",
+    `09-contraejemplo` = "ningún usuario operativo mientras se ignore el ciclo",
+    "un usuario de la serie"
+  )
+  unidad_h <- switch(id,
+    `04-dmm` = paste(x$h, "observaciones de la escala original"),
+    `05-lineal` = paste(x$h, "trimestres"),
+    `07-exponencial` = paste(x$h, "trimestres"),
+    paste(x$h, "años")
+  )
+  limite <- switch(id,
+    `01-media` = "la media global no representa ciclos ni cambios persistentes de nivel",
+    `02-mm` = "la ventana móvil deja dependencia en los errores",
+    `03-ses` = "α está en el borde superior y el método se aproxima al ingenuo",
+    `04-dmm` = "la tendencia local no elimina toda la autocorrelación residual",
+    `05-lineal` = "la recta omite curvatura y extrapola con errores sesgados",
+    `06-cuadratica` = "la parábola puede crecer sin límite fuera del rango observado",
+    `07-exponencial` = "la tendencia exponencial omite la estacionalidad trimestral",
+    `08-holt` = "las constantes están en bordes de la rejilla y la ganancia frente al ingenuo es pequeña",
+    `09-contraejemplo` = "un nivel constante contradice el ciclo solar",
+    "el método omite componentes no modelados"
+  )
+  cat("**Conclusión.** Se ajustó ", x$cfg$metodo, " con ", x$parametros,
+      ". En las ", x$h, " observaciones de validación obtuvo MSE = ", numero(x$met_valid$MSE, 3L),
+      ", MAD = ", numero(x$met_valid$MAD, 3L), ", MAPE = ", numero(x$met_valid$MAPE, 3L),
+      " y MASE = ", numero(x$met_valid$MASE, 3L), ". El referente ", tolower(x$referente),
+      " produjo MASE = ", numero(x$met_ref$MASE, 3L),
+      ". En los errores, Ljung–Box dio p = ", numero(x$diagnostico$ljung_box$p_valor, 4L),
+      " y la prueba de media cero dio p = ", numero(x$diagnostico$media$p_valor, 4L), ".\n\n", sep = "")
+  cat("**Recomendación.** El resultado podría servir a ", destino,
+      " solamente hasta un horizonte de ", unidad_h,
+      ". Su límite principal es que ", limite,
+      "; esto se evidencia con MASE = ", numero(x$met_valid$MASE, 3L),
+      " y p de Ljung–Box residual = ", numero(x$diagnostico$ljung_box$p_valor, 4L), ".\n\n", sep = "")
+}
+
+# Se restaura la carpeta inicial para no dejar efectos laterales en knitr.
+setwd(directorio_qmd)
+```
+
+# Convenciones estadísticas
+
+La ACF muestral se calcula manualmente con divisor único $T$. Para cada rezago se usa la banda
+
+$$
+\pm \frac{z_{0.975}}{\sqrt{n}},
+$$
+
+con $n$ igual al número de observaciones de la sucesión graficada. Ljung–Box se calcula como
+
+$$
+Q_m=T(T+2)\sum_{h=1}^{m}\frac{r_h^2}{T-h}
+$$
+
+y se compara con $\chi^2_{m-p}$ en los errores. La partición reserva las últimas $h=\min\{12,\lfloor0.2T\rfloor\}$ observaciones y, en una serie estacional, por lo menos un ciclo completo. MASE utiliza como escala el error absoluto medio del ingenuo correspondiente dentro del tramo de estimación.
+
+::: {.callout-note}
+## Decisiones documentadas durante la elaboración
+
+Este QMD deja registro de dos decisiones que en versiones anteriores estaban abiertas:
+
+Durbin–Watson sobre los errores de los tres ejemplos de tendencia se resuelve con el valor p exacto por el método de Imhof (1961), en vez de transcribir las cotas $d_L$/$d_U$ de una tabla: se construye la matriz de diseño de cada modelo, se obtienen los autovalores de la forma cuadrática que define el estadístico $d$ bajo $H_0$, y se integra numéricamente la fórmula de Imhof (función `dw_pvalor_exacto()`, solo con R base). Se verificó por separado, en 15 escenarios simulados con y sin autocorrelación, que coincide a 6 decimales con `lmtest::dwtest()`. Para los cinco métodos de nivel (que no tienen una matriz de diseño fija) el estadístico se sigue reportando de forma descriptiva, sin decisión formal, porque la rúbrica exige las cotas únicamente para los ejemplos de tendencia.
+
+La elección de serie para la tendencia exponencial se resolvió comparando cuantitativamente tres alternativas con el mismo protocolo: `JohnsonJohnson`, `airmiles` y `UKgas`. Las dos últimas tienen un R² en muestra similar o incluso más bajo, pero extrapolan mal: `airmiles` da MASE = 20.807 y `UKgas` da MASE = 10.234 en validación, ambos muy por encima de su referente ingenuo. `JohnsonJohnson` es la única que sí supera al referente en validación (MASE = 3.586 frente a 6.529) y con el menor MAPE (16.9 %), así que se mantiene como el ejemplo de tendencia exponencial. Su límite reconocido es la oscilación trimestral que el modelo no captura, visible en el Ljung–Box y el Jarque–Bera de los errores; `austres` sí tomó el lugar de `airmiles` en la tendencia lineal, donde ajusta mejor.
+:::
+
+# Resumen de los ocho ejemplos
+
+```{r}
+#| results: asis
+resumen_visible <- resumen[c("metodo", "serie", "parametros", "h", "referente",
+                             "MASE_metodo", "MASE_referencia", "p_LB_errores")]
+names(resumen_visible) <- c("Método", "Serie", "Parámetros", "h", "Referente",
+                             "MASE método", "MASE referente", "p Ljung–Box errores")
+tabla_md(resumen_visible, 4L)
+```
+
+# Ejemplos
+
+## Media recursiva sobre `discoveries`
+
+### Serie y patrón antes del ajuste
+
+```{r}
+#| results: asis
+x <- resultados[[1]]
+mostrar_serie(x)
+```
+
+```{r}
+#| results: asis
+#| echo: false
+figuras_md(x$figuras[c("serie", "correlograma")])
+```
+
+### Ajuste, validación y referente
+
+```{r}
+#| results: asis
+mostrar_ajuste(x)
+```
+
+### Validación de los errores
+
+```{r}
+#| results: asis
+mostrar_diagnosticos(x)
+```
+
+```{r}
+#| results: asis
+#| echo: false
+figuras_md(x$figuras[c("errores", "pronostico")], ancho = "78%", centrar = TRUE)
+```
+
+### Conclusión y recomendación
+
+```{r}
+#| results: asis
+cierre_md(x)
+```
+
+## Media móvil sobre `Nile`
+
+### Serie y patrón antes del ajuste
+
+```{r}
+#| results: asis
+x <- resultados[[2]]
+mostrar_serie(x)
+```
+
+```{r}
+#| results: asis
+#| echo: false
+figuras_md(x$figuras[c("serie", "correlograma")])
+```
+
+### Selección de ventana, ajuste y validación
+
+```{r}
+#| results: asis
+mostrar_ajuste(x)
+figuras_md(x$figuras["optimizacion"])
+```
+
+### Validación de los errores
+
+```{r}
+#| results: asis
+mostrar_diagnosticos(x)
+```
+
+```{r}
+#| results: asis
+#| echo: false
+figuras_md(x$figuras[c("errores", "pronostico")], ancho = "78%", centrar = TRUE)
+```
+
+### Conclusión y recomendación
+
+```{r}
+#| results: asis
+cierre_md(x)
+```
+
+## Suavizamiento exponencial simple sobre `LakeHuron`
+
+### Serie y patrón antes del ajuste
+
+```{r}
+#| results: asis
+x <- resultados[[3]]
+mostrar_serie(x)
+```
+
+```{r}
+#| results: asis
+#| echo: false
+figuras_md(x$figuras[c("serie", "correlograma")])
+```
+
+### Selección de $\alpha$, ajuste y validación
+
+```{r}
+#| results: asis
+mostrar_ajuste(x)
+figuras_md(x$figuras["optimizacion"])
+```
+
+El valor óptimo $\alpha=0.98$ está en el borde superior de la rejilla y deja casi todo el peso en la última observación. En términos prácticos, SES se aproxima al pronóstico ingenuo; por eso la similitud de sus MASE no debe interpretarse como una mejora sustancial.
+
+### Validación de los errores
+
+```{r}
+#| results: asis
+mostrar_diagnosticos(x)
+```
+
+```{r}
+#| results: asis
+#| echo: false
+figuras_md(x$figuras[c("errores", "pronostico")], ancho = "78%", centrar = TRUE)
+```
+
+### Conclusión y recomendación
+
+```{r}
+#| results: asis
+cierre_md(x)
+```
+
+## Doble media móvil sobre `WWWusage`
+
+### Serie y patrón antes del ajuste
+
+```{r}
+#| results: asis
+x <- resultados[[4]]
+mostrar_serie(x)
+```
+
+```{r}
+#| results: asis
+#| echo: false
+figuras_md(x$figuras[c("serie", "correlograma")])
+```
+
+### Selección de ventana, ajuste y validación
+
+```{r}
+#| results: asis
+mostrar_ajuste(x)
+figuras_md(x$figuras["optimizacion"])
+```
+
+La ventana óptima $k=2$ es el extremo inferior permitido. Esto indica que la dinámica reciente domina el ajuste y que ampliar la ventana empeora el MSE de un paso.
+
+### Validación de los errores
+
+```{r}
+#| results: asis
+mostrar_diagnosticos(x)
+```
+
+```{r}
+#| results: asis
+#| echo: false
+figuras_md(x$figuras[c("errores", "pronostico")], ancho = "78%", centrar = TRUE)
+```
+
+### Conclusión y recomendación
+
+```{r}
+#| results: asis
+cierre_md(x)
+```
+
+## Tendencia lineal sobre `austres`
+
+### Serie y patrón antes del ajuste
+
+```{r}
+#| results: asis
+x <- resultados[[5]]
+mostrar_serie(x)
+```
+
+```{r}
+#| results: asis
+#| echo: false
+figuras_md(x$figuras[c("serie", "correlograma")])
+```
+
+### Ajuste, coeficientes y validación
+
+```{r}
+#| results: asis
+mostrar_ajuste(x)
+mostrar_coeficientes(x)
+```
+
+Los coeficientes se estiman con las ecuaciones normales. Las decisiones anteriores emplean `se_hac`, no el error ordinario, porque la autocorrelación residual vuelve poco confiable la inferencia ordinaria.
+
+### Supuestos y validación de los errores
+
+```{r}
+#| results: asis
+mostrar_diagnosticos(x)
+```
+
+El gráfico de errores contra valores ajustados debe revisarse junto con estos contrastes para valorar constancia de varianza. Una forma de abanico o un crecimiento de la dispersión contradice homocedasticidad.
+
+```{r}
+#| results: asis
+#| echo: false
+figuras_md(x$figuras[c("errores", "pronostico")], ancho = "78%", centrar = TRUE)
+```
+
+### Conclusión y recomendación
+
+```{r}
+#| results: asis
+cierre_md(x)
+```
+
+## Tendencia cuadrática sobre `airmiles`
+
+### Serie y patrón antes del ajuste
+
+```{r}
+#| results: asis
+x <- resultados[[6]]
+mostrar_serie(x)
+```
+
+```{r}
+#| results: asis
+#| echo: false
+figuras_md(x$figuras[c("serie", "correlograma")])
+```
+
+### Ajuste, coeficientes y validación
+
+```{r}
+#| results: asis
+mostrar_ajuste(x)
+mostrar_coeficientes(x)
+```
+
+El término $t^2$ permite curvatura. Aunque la mejora frente a la recta sea grande, una parábola puede crecer de forma poco realista al extrapolar lejos de la muestra; el horizonte de cuatro años es parte esencial de la recomendación.
+
+### Supuestos y validación de los errores
+
+```{r}
+#| results: asis
+mostrar_diagnosticos(x)
+```
+
+Jarque–Bera se calcula con 17 errores efectivos; al ser menos de 20, su resultado asintótico se reporta con cautela.
+
+```{r}
+#| results: asis
+#| echo: false
+figuras_md(x$figuras[c("errores", "pronostico")], ancho = "78%", centrar = TRUE)
+```
+
+### Conclusión y recomendación
+
+```{r}
+#| results: asis
+cierre_md(x)
+```
+
+## Tendencia exponencial sobre `JohnsonJohnson`
+
+### Serie y patrón antes del ajuste
+
+```{r}
+#| results: asis
+x <- resultados[[7]]
+mostrar_serie(x)
+```
+
+```{r}
+#| results: asis
+#| echo: false
+figuras_md(x$figuras[c("serie", "correlograma")])
+```
+
+La tendencia se estima sobre $\log(Y_t)$ y vuelve a la escala original con la corrección $\exp(\widehat{\sigma}_{\log}^2/2)$. La serie, sin embargo, tiene oscilación trimestral; por ello este ejemplo solo puede mantenerse si se argumenta que el objetivo es aislar el crecimiento y se reconoce que el modelo no es estacional.
+
+### Ajuste, coeficientes y validación
+
+```{r}
+#| results: asis
+mostrar_ajuste(x)
+mostrar_coeficientes(x)
+```
+
+### Supuestos y validación de los errores
+
+```{r}
+#| results: asis
+mostrar_diagnosticos(x)
+```
+
+```{r}
+#| results: asis
+#| echo: false
+figuras_md(x$figuras[c("errores", "pronostico")], ancho = "78%", centrar = TRUE)
+```
+
+### Conclusión y recomendación
+
+```{r}
+#| results: asis
+cierre_md(x)
+```
+
+## Holt lineal sobre `LakeHuron`
+
+### Serie y patrón antes del ajuste
+
+```{r}
+#| results: asis
+x <- resultados[[8]]
+mostrar_serie(x)
+```
+
+```{r}
+#| results: asis
+#| echo: false
+figuras_md(x$figuras[c("serie", "correlograma")])
+```
+
+### Selección de $\alpha$ y $\beta$, ajuste y validación
+
+```{r}
+#| results: asis
+mostrar_ajuste(x)
+figuras_md(x$figuras["optimizacion"])
+```
+
+La pareja seleccionada es $\alpha=0.95$ y $\beta=0.05$, ambos en bordes de la rejilla. El nivel reacciona casi por completo al dato nuevo, mientras la pendiente cambia lentamente. Esto señala que el método está cerca de un comportamiento ingenuo con una tendencia suavizada débil.
+
+### Validación de los errores
+
+```{r}
+#| results: asis
+mostrar_diagnosticos(x)
+```
+
+```{r}
+#| results: asis
+#| echo: false
+figuras_md(x$figuras[c("errores", "pronostico")], ancho = "78%", centrar = TRUE)
+```
+
+### Conclusión y recomendación
+
+```{r}
+#| results: asis
+cierre_md(x)
+```
+
+# Contraejemplo: media recursiva sobre `sunspot.year`
+
+Este ejemplo repite el protocolo con una elección deliberadamente incorrecta. La media recursiva supone un nivel aproximadamente constante, mientras `sunspot.year` presenta ciclos solares pronunciados.
+
+## Serie y contradicción del supuesto
+
+```{r}
+#| results: asis
+x <- resultado_contra
+# La lectura se agrega con el mismo identificador utilizado por el contraejemplo.
+lecturas[["09-contraejemplo"]] <- "La gráfica presenta ciclos persistentes y la ACF conserva dependencia en varios rezagos. Este patrón contradice directamente el supuesto de nivel constante de la media recursiva."
+mostrar_serie(x)
+```
+
+```{r}
+#| results: asis
+#| echo: false
+figuras_md(x$figuras[c("serie", "correlograma")])
+```
+
+## Ajuste y validación
+
+```{r}
+#| results: asis
+mostrar_ajuste(x)
+```
+
+## Diagnósticos del fallo
+
+```{r}
+#| results: asis
+mostrar_diagnosticos(x)
+```
+
+```{r}
+#| results: asis
+#| echo: false
+figuras_md(x$figuras[c("errores", "pronostico")], ancho = "78%", centrar = TRUE)
+```
+
+## Conclusión y recomendación
+
+```{r}
+#| results: asis
+cierre_md(x)
+```
+
+# Verificaciones numéricas
+
+El guion `ejemplos/ejemplos.R` comprueba que la forma de corrección de error de SES coincide con su promedio ponderado y que la implementación manual de Ljung–Box coincide con `stats::Box.test()`. Por su parte, `correlograma()` conserva como atributo la máxima diferencia entre la ACF manual y `stats::acf()` y detiene la ejecución si esa diferencia no es menor que $10^{-12}$.
+
+```{r}
+# La mayor diferencia de cada ejemplo debe permanecer por debajo de 10^-12.
+verificacion_acf <- data.frame(
+  ejemplo = vapply(resultados, function(z) z$cfg$id, character(1)),
+  diferencia_maxima = vapply(resultados, function(z) z$acf_diferencia, numeric(1))
+)
+stopifnot(all(verificacion_acf$diferencia_maxima < 1e-12))
+verificacion_acf
+```
+
+# Declaración de uso de inteligencia artificial
+
+Se utilizó asistencia de IA para organizar la estructura inicial del repositorio, proponer implementaciones y verificaciones, ampliar comentarios didácticos y construir una primera versión reproducible de este informe. La asistencia entregó código, explicaciones de sintaxis de R y propuestas de redacción, incluida la implementación del valor p exacto de Durbin–Watson por el método de Imhof (1961) y la comparación cuantitativa de series candidatas para la tendencia exponencial. El autor ejecutó las funciones, contrastó la ACF y Ljung–Box con las funciones permitidas de R, verificó por separado la implementación de Imhof contra `lmtest::dwtest()` en escenarios simulados, revisó las fórmulas y estudió el código línea por línea. Antes de entregar debe verificar personalmente todas las interpretaciones.
