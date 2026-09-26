@@ -1,0 +1,31 @@
+R version 4.4.2 (2024-10-31 ucrt)
+Platform: x86_64-w64-mingw32/x64
+Running under: Windows 11 x64 (build 26200)
+
+Matrix products: default
+
+
+locale:
+[1] LC_COLLATE=English_United States.utf8 
+[2] LC_CTYPE=English_United States.utf8   
+[3] LC_MONETARY=English_United States.utf8
+[4] LC_NUMERIC=C                          
+[5] LC_TIME=English_United States.utf8    
+
+time zone: America/Bogota
+tzcode source: internal
+
+attached base packages:
+[1] stats     graphics  grDevices utils     datasets  methods   base     
+
+loaded via a namespace (and not attached):
+ [1] patchwork_1.3.2    vctrs_0.6.5        cli_3.6.3          knitr_1.49        
+ [5] rlang_1.1.4        xfun_0.49          purrr_1.0.2        generics_0.1.3    
+ [9] textshaping_0.4.1  jsonlite_1.8.9     labeling_0.4.3     glue_1.8.0        
+[13] htmltools_0.5.8.1  ragg_1.3.3         scales_1.4.0       rmarkdown_2.29    
+[17] grid_4.4.2         evaluate_1.0.1     tibble_3.2.1       fastmap_1.2.0     
+[21] yaml_2.3.10        lifecycle_1.0.4    compiler_4.4.2     dplyr_1.1.4       
+[25] RColorBrewer_1.1-3 htmlwidgets_1.6.4  pkgconfig_2.0.3    tidyr_1.3.1       
+[29] systemfonts_1.2.3  farver_2.1.2       digest_0.6.37      viridisLite_0.4.2 
+[33] R6_2.5.1           tidyselect_1.2.1   pillar_1.10.0      magrittr_2.0.3    
+[37] withr_3.0.2        tools_4.4.2        gtable_0.3.6       ggplot2_3.5.2     
